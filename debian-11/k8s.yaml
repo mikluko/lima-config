@@ -2,8 +2,8 @@
 
 message: |
 
-  export KUBECONFIG=/tmp/lima-k8s/kube_config
-  kubectl version
+    export KUBECONFIG=/tmp/lima-k8s/kube_config
+    kubectl version
 
 images:
   - location: "https://cloud.debian.org/images/cloud/bullseye/daily/latest/debian-11-generic-amd64-daily.qcow2"
@@ -132,35 +132,20 @@ probes:
   - script: |
       #!/bin/bash
       set -eux -o pipefail
-      if ! timeout 30s bash -c "until [ -x /usr/bin/kubectl ]; do sleep 3; done"; then
-        echo >&2 "kubectl is not installed yet"
-        exit 1
-      fi
-    hint: |
-      See "/var/log/cloud-init-output.log". in the guest
+      which kubectl && which kubeadm && which crictl
+    description: kubernetes tools to be installed
   - script: |
       #!/bin/bash
       set -eux -o pipefail
-      if ! timeout 300s bash -c "until [ -f /etc/kubernetes/admin.conf ]; do sleep 3; done"; then
-        echo >&2 "k8s is not running yet"
-        exit 1
-      fi
-    hint: |
-      The k8s kubeconfig file has not yet been created.
+      test -f /etc/kubernetes/admin.conf
+    description: cluster initialization to finish
   - script: |
       #!/bin/bash
       set -eux -o pipefail
-      if ! timeout 300s bash -c "until [ -f /tmp/lima-k8s/kube_config ]; do sleep 3; done"; then
-        echo >&2 "kubeconfig is not ready yet"
-        exit 1
-      fi
+      kubectl version >/dev/null 2>&1
+    description: kubeapi to become available
   - script: |
       #!/bin/bash
       set -eux -o pipefail
-      if ! timeout 300s bash -c "until kubectl version >/dev/null 2>&1; do sleep 3; done"; then
-        echo >&2 "kubernetes cluster is not up and running yet"
-        exit 1
-      fi
-  - script: |
-      #!/bin/bash
-      set -eux -o pipefail
+      kubectl wait --for=condition=ready node --all --timeout=1s
+    description: cluster node to transition into ready state

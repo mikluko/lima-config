@@ -18,7 +18,6 @@ There in https://github.com/lima-vm/lima/tree/master/examples[Lima examples] are
 
 Pitfalls:
 
-  * cluster is not immediately available upon VM spin-up (needs more probes?)
   * will break when host wakes up from long sleep (clock skew problem?)
 
 == k3s cluster:
