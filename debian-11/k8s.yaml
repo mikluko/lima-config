@@ -1,0 +1,166 @@
+# Kubernetes on Debian 11 Bullseye
+
+message: |
+
+  export KUBECONFIG=/tmp/lima-k8s/kube_config
+  kubectl version
+
+images:
+  - location: "https://cloud.debian.org/images/cloud/bullseye/daily/latest/debian-11-generic-amd64-daily.qcow2"
+    arch: "x86_64"
+  - location: "https://cloud.debian.org/images/cloud/bullseye/daily/latest/debian-11-generic-arm64-daily.qcow2"
+    arch: "aarch64"
+
+mounts:
+  - location: "/tmp/lima-k8s"
+    writable: true
+
+containerd:
+  system: false
+  user: false
+
+portForwards:
+  - guestSocket: "/run/containerd/containerd.sock"
+    hostSocket: "{{.Dir}}/containerd.sock"
+
+
+provision:
+
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail      
+      test -f /etc/modules-load.d/99-lima-k8s.conf && exit 0
+      cat > /etc/modules-load.d/99-lima-k8s.conf <<EOF
+      overlay
+      br_netfilter
+      EOF
+      modprobe overlay
+      modprobe br_netfilter
+
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      test -f /etc/sysctl.d/99-lima-k8s.conf && exit 0
+      cat > /etc/sysctl.d/99-lima-k8s.conf <<EOF 
+      net.bridge.bridge-nf-call-iptables  = 1
+      net.ipv4.ip_forward                 = 1
+      net.bridge.bridge-nf-call-ip6tables = 1
+      EOF
+      sysctl --system
+
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      test -f /etc/apt/apt.conf.d/99-lima-k8s && exit 0
+      cat > /etc/apt/apt.conf.d/99-lima-k8s <<EOF
+      APT::Get::Install-Recommends "false";
+      APT::Get::Install-Suggests "false";
+      EOF
+
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      test -f /etc/apt/trusted.gpg.d/kubernetes-archive-keyring.gpg && exit 0
+      curl -fsSLo /etc/apt/trusted.gpg.d/kubernetes-archive-keyring.gpg https://packages.cloud.google.com/apt/doc/apt-key.gpg
+
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      test -f /etc/apt/sources.list.d/lima-k8s.list && exit 0       
+      cat <<EOF > /etc/apt/sources.list.d/lima-k8s.list
+      deb https://apt.kubernetes.io/ kubernetes-xenial main
+      EOF
+      export DEBIAN_FRONTEND=noninteractive
+      apt update
+
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      test -x /usr/bin/kubectl && exit 0
+      export DEBIAN_FRONTEND=noninteractive
+      apt install -y kubelet kubeadm kubectl cri-tools containerd containernetworking-plugins
+
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      test -f /etc/crictl.yaml && exit 0
+      cat > /etc/crictl.yaml <<EOF
+      runtime-endpoint: unix:///run/containerd/containerd.sock
+      image-endpoint: unix:///run/containerd/containerd.sock
+      EOF
+
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      test -f /etc/kubernetes/admin.conf && exit 0
+      kubeadm config images pull -v=2
+      kubeadm init -v=2 \
+        --cri-socket=/run/containerd/containerd.sock \
+        --pod-network-cidr=10.244.0.0/16 \
+        --apiserver-cert-extra-sans=127.0.0.1 > /etc/kubernetes/README.txt
+      export KUBECONFIG=/etc/kubernetes/admin.conf
+      kubectl apply -f https://raw.githubusercontent.com/flannel-io/flannel/v0.15.1/Documentation/kube-flannel.yml
+      kubectl taint nodes --all node-role.kubernetes.io/master-
+
+  - mode: user
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      test -f $HOME/.kube/config && exit 0
+      install -d -m 0750 $HOME/.kube
+      sudo install -o $(id -u) -g $(id -g) -m 0640 /etc/kubernetes/admin.conf $HOME/.kube/config
+
+  - mode: user
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      export KUBECONFIG=/tmp/lima-k8s/kube_config
+      until mountpoint -q /tmp/lima-k8s; do sleep 3; done
+      install -m 0640 $HOME/.kube/config /tmp/lima-k8s/kube_config
+      kubectl config set clusters.kubernetes.server https://127.0.0.1:6443
+      kubectl config rename-context kubernetes-admin@kubernetes lima-k8s
+
+probes:
+  - script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      if ! timeout 30s bash -c "until [ -x /usr/bin/kubectl ]; do sleep 3; done"; then
+        echo >&2 "kubectl is not installed yet"
+        exit 1
+      fi
+    hint: |
+      See "/var/log/cloud-init-output.log". in the guest
+  - script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      if ! timeout 300s bash -c "until [ -f /etc/kubernetes/admin.conf ]; do sleep 3; done"; then
+        echo >&2 "k8s is not running yet"
+        exit 1
+      fi
+    hint: |
+      The k8s kubeconfig file has not yet been created.
+  - script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      if ! timeout 300s bash -c "until [ -f /tmp/lima-k8s/kube_config ]; do sleep 3; done"; then
+        echo >&2 "kubeconfig is not ready yet"
+        exit 1
+      fi
+  - script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      if ! timeout 300s bash -c "until kubectl version >/dev/null 2>&1; do sleep 3; done"; then
+        echo >&2 "kubernetes cluster is not up and running yet"
+        exit 1
+      fi
+  - script: |
+      #!/bin/bash
+      set -eux -o pipefail

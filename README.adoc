@@ -1,0 +1,21 @@
+= Collection of Lima configs
+
+== Motivation
+
+There in https://github.com/lima-vm/lima/tree/master/examples[Lima examples] are pieces providing similar or same configurations. But they all based on Ubuntu. I do not appreciate Ubuntu. There's nothing wrong with it, it's just me. If you don't care, you'd probably better go and use what Lima offers out of the box.
+
+== Usage
+
+== kubeadm cluster:
+
+    limactl start --tty=false ./debian-11/k8s.yaml
+    export KUBECONFIG=/tmp/lima-k8s/kube_config:$KUBECONFIG
+
+Pitfalls:
+
+  * cluster is not immediately available upon VM spin-up (needs more probes?)
+  * will break when host wakes up from long sleep (clock skew problem?)
+
+== k3s cluster:
+
+WiP
