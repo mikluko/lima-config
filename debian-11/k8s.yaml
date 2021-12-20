@@ -23,7 +23,6 @@ portForwards:
   - guestSocket: "/run/containerd/containerd.sock"
     hostSocket: "{{.Dir}}/containerd.sock"
 
-
 provision:
 
   - mode: system

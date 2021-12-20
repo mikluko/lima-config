@@ -1,0 +1,87 @@
+# Kubernetes on Debian 11 Bullseye
+# requires Lima v0.7.0 or later
+
+message: |
+  
+  export KUBECONFIG=/tmp/lima-k3s/kube_config
+  kubectl version
+
+images:
+  - location: "https://cloud.debian.org/images/cloud/bullseye/daily/latest/debian-11-generic-amd64-daily.qcow2"
+    arch: "x86_64"
+  - location: "https://cloud.debian.org/images/cloud/bullseye/daily/latest/debian-11-generic-arm64-daily.qcow2"
+    arch: "aarch64"
+
+mounts:
+  - location: "/tmp/lima-k3s"
+    writable: true
+
+containerd:
+  system: false
+  user: false
+
+portForwards:
+  - guestPort: 80
+    hostPort: 8080
+  - guestPort: 443
+    hostPort: 8443
+
+provision:
+
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      test -f /etc/apt/apt.conf.d/99-lima-k3s && exit 0
+      cat > /etc/apt/apt.conf.d/99-lima-k3s <<EOF
+      APT::Get::Install-Recommends "false";
+      APT::Get::Install-Suggests "false";
+      EOF
+
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      test -x /usr/local/bin/k3s && exit 0
+      curl -sfL https://get.k3s.io | sh -
+
+  - mode: user
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      test -f $HOME/.kube/config && exit 0
+      sudo install -o $(id -u) -g $(id -g) -D -m 0640 /etc/rancher/k3s/k3s.yaml $HOME/.kube/config
+      echo "export KUBECONFIG=$HOME/.kube/config" >> .bashrc
+
+  - mode: user
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      until mountpoint -q /tmp/lima-k3s; do sleep 3; done
+      install -m 0640 $HOME/.kube/config /tmp/lima-k3s/kube_config
+      kubectl --kubeconfig=/tmp/lima-k3s/kube_config config rename-context default lima-k3s
+
+  - mode: user
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      kubectl --kubeconfig=$HOME/.kube/config wait --for=condition=ready node --all --timeout=180s || exit 1
+
+  - mode: user
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      kubectl --kubeconfig=$HOME/.kube/config get ns cert-manager > /dev/null 2>&1 && exit 0
+      kubectl --kubeconfig=$HOME/.kube/config apply -f https://github.com/jetstack/cert-manager/releases/download/v1.6.1/cert-manager.yaml
+
+probes:
+  - script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      test -x /usr/local/bin/k3s
+    description: k3s binary to be installed
+  - script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      systemctl status --no-pager k3s > /dev/null 2>&1
+    description: k3s service to start

@@ -22,4 +22,5 @@ Pitfalls:
 
 == k3s cluster:
 
-WiP
+    limactl start --ty=false ./debian-11/k3s.yaml
+    export KUBECONFIG=/tmp/lima-k3s/kube_config:$KUBECONFIG
