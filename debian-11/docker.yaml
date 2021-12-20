@@ -1,0 +1,76 @@
+# Rootless Docker on Debian 11 Bullseye
+
+message: |
+
+  Run `docker` on the host:
+    
+      export DOCKER_HOST=unix://{{.Dir}}/docker.sock
+      docker info
+
+images:
+  - location: "https://cloud.debian.org/images/cloud/bullseye/daily/latest/debian-11-generic-amd64-daily.qcow2"
+    arch: "x86_64"
+  - location: "https://cloud.debian.org/images/cloud/bullseye/daily/latest/debian-11-generic-arm64-daily.qcow2"
+    arch: "aarch64"
+
+mounts: []
+
+containerd:
+  system: false
+  user: false
+
+portForwards:
+  - guestSocket: "/run/user/{{ .UID }}/docker.sock"
+    hostSocket: "{{ .Dir }}/docker.sock"
+
+provision:
+
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      test -f /etc/apt/apt.conf.d/99-lima-docker && exit 0
+      cat > /etc/apt/apt.conf.d/99-lima-docker <<EOF
+      APT::Get::Install-Recommends "false";
+      APT::Get::Install-Suggests "false";
+      EOF
+
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      test -x /usr/bin/gpg && exit 0
+      apt install -y gnupg
+
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      test -f /etc/apt/trusted.gpg.d/docker-archive-keyring.gpg && exit 0
+      curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/trusted.gpg.d/docker-archive-keyring.gpg
+
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      test -f /etc/apt/sources.list.d/docker.list && exit 0
+      cat > /etc/apt/sources.list.d/docker.list <<EOF
+      deb https://download.docker.com/linux/debian bullseye stable
+      EOF
+      apt update
+
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      test -x /usr/bin/docker && exit 0
+      apt install -y docker-ce docker-ce-cli containerd.io uidmap
+      systemctl disable --now docker
+
+  - mode: user
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      test -S /run/user/$(id -u)/docker.sock && exit 0
+      dockerd-rootless-setuptool.sh install
+      echo "export DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> $HOME/.bashrc

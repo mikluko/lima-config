@@ -6,6 +6,11 @@ There in https://github.com/lima-vm/lima/tree/master/examples[Lima examples] are
 
 == Usage
 
+== Docker:
+
+    limactl start --tty=false ./debian-11/docker.yaml
+    export DOCKER_HOST=unix:/$HOME/.lima/docker/docker.sock
+
 == kubeadm cluster:
 
     limactl start --tty=false ./debian-11/k8s.yaml
