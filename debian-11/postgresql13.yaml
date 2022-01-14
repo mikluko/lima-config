@@ -1,0 +1,103 @@
+# Postgres 13 on Debian 11 Bullseye
+
+message: |
+  
+  = Access endpoints
+  
+  Unix socket: {{ .Dir }}/.s.PGSQL.5432
+  TCP socket:  127.0.0.1:5432
+  
+  = Authentication
+  
+  On unix socket Postgres configured to "trust" all non-superuser connections. On TCP "md5" 
+  authentication is required. For the exact meaning of mentioned auth methods please refer 
+  to Postgres documentation: https://www.postgresql.org/docs/13/auth-pg-hba-conf.html
+
+  = Examples  
+
+  Connect to the created Postgres cluster with superuser role:
+      
+      psql -h {{ .Dir }} postgres
+  
+  Set environment for superuser access:
+  
+      export PGHOST={{ .Dir }}
+      export PGDATABASE=postgres
+      psql
+
+  Create an ordinary user and database:
+
+      createuser -h {{ .Dir }} -P somebody
+      createdb -h {{ .Dir }} -O somebody somedb
+  
+  Log in as an ordinary user:
+  
+      psql -h 127.0.0.1 -U somebody somedb 
+
+  Set environment for ordinary user access:
+  
+      export PGHOST=127.0.0.1
+      export PGUSER=somebody
+      export PGDATABASE=somedb
+      psql  
+
+cpus: 1
+memory: 2G
+disk: 20G
+
+images:
+  - location: "https://cloud.debian.org/images/cloud/bullseye/daily/latest/debian-11-generic-amd64-daily.qcow2"
+    arch: "x86_64"
+  - location: "https://cloud.debian.org/images/cloud/bullseye/daily/latest/debian-11-generic-arm64-daily.qcow2"
+    arch: "aarch64"
+
+mounts: [ ]
+
+containerd:
+  system: false
+  user: false
+
+portForwards:
+  - guestSocket: "/var/run/postgresql/.s.PGSQL.5432"
+    hostSocket: "{{ .Dir }}/.s.PGSQL.5432"
+  - guestPort: 5432
+    hostPort: 5432
+
+provision:
+
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      test -f /etc/apt/apt.conf.d/99-lima-docker && exit 0
+      cat > /etc/apt/apt.conf.d/99-lima-docker <<EOF
+      APT::Get::Install-Recommends "false";
+      APT::Get::Install-Suggests "false";
+      EOF
+
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      test -x /usr/lib/postgresql/13/bin/postgres && exit 0
+      apt install -y postgresql
+
+  - mode: user
+    script: |
+      set -eux -o pipefail
+      test -f /etc/postgresql/13/main/pg_hba.conf.distrib && exit 0
+      dpkg-divert --rename /etc/postgresql/13/main/pg_hba.conf
+      cat <<EOF | sudo tee /etc/postgresql/13/main/pg_hba.conf
+      local   all             postgres                                peer
+      local   all             $USER                                   peer
+      local   all             all                                     trust
+      host    all             all             127.0.0.1/32            md5
+      host    all             all             ::1/128                 md5
+      EOF
+      sudo systemctl restart postgresql.service
+
+  - mode: user
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      sudo -u postgres createuser -s $USER 2>&1 >/dev/null || exit 0
